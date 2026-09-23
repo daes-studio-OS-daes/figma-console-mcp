@@ -113,9 +113,28 @@ export function computePluginUpdateAvailable(
 
 const logger = createChildLogger({ component: 'websocket-server' });
 
+/**
+ * Who a running instance belongs to: the MCP client that spawned it, and the
+ * directory it was spawned in. Every session starts its own server and holds a
+ * port until it exits, so a port on its own says nothing about which session
+ * left it behind — this is what makes one instance tellable from the next.
+ */
+export interface SessionIdentity {
+  /** From the MCP initialize handshake. Null until the client has identified itself. */
+  client: { name: string; version: string } | null;
+  /** Working directory of the server process. */
+  cwd: string;
+}
+
 export interface WebSocketServerOptions {
   port: number;
   host?: string;
+  /**
+   * Read at request time rather than captured at startup: the bridge listens
+   * before the MCP client has completed the initialize handshake, so the
+   * client is not known yet when this server starts.
+   */
+  describeSession?: () => SessionIdentity;
   /**
    * Version of the plugin files shipped with this server, used for the
    * FILE_INFO version handshake. Defaults to the PLUGIN_VERSION parsed from
@@ -266,6 +285,7 @@ export class FigmaWebSocketServer extends EventEmitter {
       const connectedClients = Array.from(this.clients.values()).filter(
         c => c.ws.readyState === WebSocket.OPEN && (now - c.lastPongAt) < 90000
       ).length;
+      const session = this.options.describeSession?.();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         status: 'ok',
@@ -273,6 +293,8 @@ export class FigmaWebSocketServer extends EventEmitter {
         clients: this.clients.size,
         connectedClients,
         uptime: Math.floor((now - this._startedAt) / 1000),
+        client: session?.client ?? null,
+        cwd: session?.cwd ?? null,
       }));
       return;
     }

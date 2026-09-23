@@ -46,7 +46,11 @@ import { registerTokensTools } from "./core/tokens-tools.js";
 import { wrapServerForIdentity } from "./core/identity.js";
 import { PACKAGE_ROOT } from "./core/resolve-package-root.js";
 import type { IFigmaConnector } from "./core/figma-connector.js";
-import { FigmaWebSocketServer, getBundledPluginVersion } from "./core/websocket-server.js";
+import {
+	FigmaWebSocketServer,
+	getBundledPluginVersion,
+	type SessionIdentity,
+} from "./core/websocket-server.js";
 import { WebSocketConnector } from "./core/websocket-connector.js";
 import {
 	DEFAULT_WS_PORT,
@@ -3811,6 +3815,21 @@ Without libraryFileKey/libraryFileUrl, searches the currently open file (local c
 	}
 
 	/**
+	 * Which session this instance serves, for `/health`.
+	 *
+	 * `getClientVersion()` only answers once the client has completed the
+	 * initialize handshake, which happens after the bridge is listening, so this
+	 * is read per request rather than captured at startup.
+	 */
+	private describeSession(): SessionIdentity {
+		const client = this.server.server.getClientVersion();
+		return {
+			client: client ? { name: client.name, version: client.version } : null,
+			cwd: process.cwd(),
+		};
+	}
+
+	/**
 	 * Start the MCP server
 	 */
 	async start(): Promise<void> {
@@ -3855,7 +3874,11 @@ Without libraryFileKey/libraryFileUrl, searches the currently open file (local c
 
 			for (const port of portsToTry) {
 				try {
-					this.wsServer = new FigmaWebSocketServer({ port, host: wsHost });
+					this.wsServer = new FigmaWebSocketServer({
+						port,
+						host: wsHost,
+						describeSession: () => this.describeSession(),
+					});
 					await this.wsServer.start();
 
 					// Get the actual bound port (should match, but verify)
@@ -3916,7 +3939,11 @@ Without libraryFileKey/libraryFileUrl, searches the currently open file (local c
 			if (!boundPort && !lastNonPortError && evictOldestInstance(this.wsPreferredPort)) {
 				for (const port of portsToTry) {
 					try {
-						this.wsServer = new FigmaWebSocketServer({ port, host: wsHost });
+						this.wsServer = new FigmaWebSocketServer({
+						port,
+						host: wsHost,
+						describeSession: () => this.describeSession(),
+					});
 						await this.wsServer.start();
 						const addr = this.wsServer.address();
 						boundPort = addr?.port ?? port;
